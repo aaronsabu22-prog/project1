@@ -1,138 +1,223 @@
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
 import os
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+import shutil
+
 from dotenv import load_dotenv
 
-# Embeddings & Vector Store
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from fastapi import FastAPI, UploadFile, File, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
-# Gemini & Modern LangChain Chains
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel
 
-# ----------------------------------------------------
-# FastAPI Setup
-# ----------------------------------------------------
+# ------------------------------
+# LlamaIndex
+# ------------------------------
+from llama_index.core import (
+    VectorStoreIndex,
+    SimpleDirectoryReader,
+    Settings,
+)
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.llms.google_genai import GoogleGenAI
+from llama_index.vector_stores.chroma import ChromaVectorStore
+from llama_index.core.storage.storage_context import StorageContext
+
+import chromadb
+
+# ------------------------------
+# Load Environment Variables
+# ------------------------------
+load_dotenv()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# ------------------------------
+# FastAPI
+# ------------------------------
 app = FastAPI(
     title="AI Research Paper Assistant",
-    version="1.0"
+    version="2.0",
 )
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="template")
 
-# ----------------------------------------------------
-# Environment Variables
-# ----------------------------------------------------
-load_dotenv()
-
-# ----------------------------------------------------
-# Load Saved Embedding Model
-# ----------------------------------------------------
-embedding_model = HuggingFaceEmbeddings(
+# ------------------------------
+# LlamaIndex Settings
+# ------------------------------
+Settings.embed_model = HuggingFaceEmbedding(
     model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
-
-# ----------------------------------------------------
-# Load Existing Chroma Database
-# ----------------------------------------------------
-vectordb = Chroma(
-    persist_directory="research_db",
-    embedding_function=embedding_model
+Settings.llm = GoogleGenAI(
+    model="gemini-2.5-flash",
+    api_key=GOOGLE_API_KEY,
 )
 
-retriever = vectordb.as_retriever(
-    search_kwargs={"k": 3}
-)
+# ------------------------------
+# Chroma Vector DB
+# ------------------------------
+client = chromadb.PersistentClient(path="research_db")
+collection = client.get_or_create_collection("research_papers")
+vector_store = ChromaVectorStore(chroma_collection=collection)
+storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-# ----------------------------------------------------
-# Load Gemini & Modern RAG Chain
-# ----------------------------------------------------
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash-lite",
-    google_api_key=os.getenv("GOOGLE_API_KEY"),
-    temperature=0
-)
-
-# Define how the LLM should answer using the retrieved context
-system_prompt = (
-    "You are an assistant for question-answering tasks. "
-    "Use the following pieces of retrieved context to answer "
-    "the question. If you don't know the answer, say that you "
-    "don't know.\n\n"
-    "Context:\n{context}"
-)
-
-prompt = ChatPromptTemplate.from_messages([
-    ("system", system_prompt),
-    ("human", "{input}"),
-])
-
-# Create the document combining chain (Replaces "stuff" chain type)
-question_answer_chain = create_stuff_documents_chain(llm, prompt)
-
-# Create the final retrieval chain (Replaces RetrievalQA)
-rag_chain = create_retrieval_chain(retriever, question_answer_chain)
-
-# ----------------------------------------------------
-# Request Models
-# ----------------------------------------------------
-class QueryRequest(BaseModel):
-    query: str
-    k: int = 3
+# ------------------------------
+# Globals
+# ------------------------------
+index = None
+query_engine = None
+documents = None
 
 
+# ------------------------------
+# Request Schemas
+# ------------------------------
 class AskRequest(BaseModel):
     question: str
 
 
-# ----------------------------------------------------
-# Home Endpoint
-# ----------------------------------------------------
+class SearchRequest(BaseModel):
+    query: str
+
+
+# ------------------------------
+# Routes
+# ------------------------------
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request):
+async def home(request: Request):
     return templates.TemplateResponse(
         "index.html",
-        {"request": request}
+        {"request": request},
     )
 
-# ----------------------------------------------------
-# Search Endpoint
-# ----------------------------------------------------
-@app.post("/project")
-def search_documents(request: QueryRequest):
-    docs = vectordb.similarity_search(
-        request.query,
-        k=request.k
+
+@app.post("/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    global index, query_engine, documents
+
+    os.makedirs("uploads", exist_ok=True)
+    filepath = os.path.join("uploads", file.filename)
+
+    with open(filepath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    documents = SimpleDirectoryReader("uploads").load_data()
+    index = VectorStoreIndex.from_documents(
+        documents,
+        storage_context=storage_context,
     )
+    query_engine = index.as_query_engine(similarity_top_k=5)
+
     return {
-        "query": request.query,
-        "results": [
-            {
-                "content": doc.page_content,
-                "metadata": doc.metadata
-            }
-            for doc in docs
-        ]
+        "status": "success",
+        "message": "Research paper uploaded successfully.",
     }
 
-# ----------------------------------------------------
-# Ask Endpoint (RAG)
-# ----------------------------------------------------
-@app.post("/ask")
-def ask_question(request: AskRequest):
-    # Modern chains use "input" instead of "query"
-    response = rag_chain.invoke(
-        {"input": request.question}
-    )
 
-    # Modern chains return "answer" instead of "result"
+@app.post("/summary")
+async def generate_summary():
+    global query_engine
+
+    if query_engine is None:
+        return {
+            "status": "error",
+            "message": "Please upload a research paper first.",
+        }
+
+    prompt = """
+    Analyze the uploaded research paper and generate a structured summary.
+
+    Include:
+
+    1. Paper Title
+    2. Research Objective
+    3. Problem Statement
+    4. Methodology
+    5. Dataset Used
+    6. Algorithms / Models
+    7. Results
+    8. Advantages
+    9. Limitations
+    10. Future Scope
+
+    Make the summary easy to understand.
+    """
+
+    response = query_engine.query(prompt)
+    return {"status": "success", "summary": str(response)}
+
+
+@app.post("/ask")
+async def ask_question(request: AskRequest):
+    global query_engine
+
+    if query_engine is None:
+        return {
+            "status": "error",
+            "message": "Please upload a paper first.",
+        }
+
+    prompt = f"""
+    You are an AI Research Paper Assistant.
+
+    Answer ONLY using the uploaded research paper.
+
+    If the answer is not found, reply:
+
+    "I could not find this information in the uploaded paper."
+
+    Question:
+
+    {request.question}
+    """
+
+    response = query_engine.query(prompt)
     return {
+        "status": "success",
         "question": request.question,
-        "answer": response["answer"]
+        "answer": str(response),
+    }
+
+
+@app.post("/search")
+async def search_paper(request: SearchRequest):
+    global index
+
+    if index is None:
+        return {
+            "status": "error",
+            "message": "Please upload a paper first.",
+        }
+
+    retriever = index.as_retriever(similarity_top_k=5)
+    nodes = retriever.retrieve(request.query)
+
+    results = [{"score": node.score, "content": node.text} for node in nodes]
+
+    return {"status": "success", "results": results}
+
+
+@app.delete("/clear")
+async def clear_database():
+    global index, query_engine, documents
+
+    index = None
+    query_engine = None
+    documents = None
+
+    if os.path.exists("uploads"):
+        shutil.rmtree("uploads")
+    os.makedirs("uploads")
+
+    return {
+        "status": "success",
+        "message": "All uploaded papers removed.",
+    }
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "running",
+        "application": "AI Research Paper Assistant",
     }
