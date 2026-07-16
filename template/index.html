@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>AI Research Paper Assistant</title>
+
+<link rel="stylesheet" href="/static/style.css">
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>AI Research Paper Assistant</h1>
+
+<p>
+Upload research papers, generate summaries, and ask questions using AI.
+</p>
+
+<hr>
+
+<h2>Upload Research Paper</h2>
+
+<input type="file" id="paper">
+
+<button onclick="uploadPaper()">
+Upload Paper
+</button>
+
+<div id="uploadMessage"></div>
+
+<hr>
+
+<h2>Research Summary</h2>
+
+<button onclick="generateSummary()">
+Generate Summary
+</button>
+
+<div id="summary">
+Summary will appear here.
+</div>
+
+<hr>
+
+<h2>Ask Questions</h2>
+
+<input
+type="text"
+id="question"
+placeholder="Ask anything about the uploaded paper">
+
+<button onclick="askQuestion()">
+Ask AI
+</button>
+
+<div id="answer">
+AI answer will appear here.
+</div>
+
+<hr>
+
+<h2>Semantic Search</h2>
+
+<input
+type="text"
+id="searchQuery"
+placeholder="Search concepts inside paper">
+
+<button onclick="semanticSearch()">
+Search
+</button>
+
+<div id="results">
+Search results will appear here.
+</div>
+
+<hr>
+
+<button onclick="clearPaper()">
+Clear Uploaded Paper
+</button>
+
+</div>
+
+<script src="/static/script.js"></script>
+
+</body>
+</html>
