@@ -1,3 +1,6 @@
+// Replace this with your deployed FastAPI backend URL (e.g. from Render/Railway)
+const API_URL = "https://your-backend-name.onrender.com";
+
 async function uploadPaper() {
 
     const fileInput = document.getElementById("paper");
@@ -10,7 +13,7 @@ async function uploadPaper() {
     const formData = new FormData();
     formData.append("file", fileInput.files[0]);
 
-    const response = await fetch("/upload", {
+    const response = await fetch(`${API_URL}/upload`, {
         method: "POST",
         body: formData
     });
@@ -24,7 +27,7 @@ async function uploadPaper() {
 
 async function generateSummary() {
 
-    const response = await fetch("/summary");
+    const response = await fetch(`${API_URL}/summary`);
 
     const data = await response.json();
 
@@ -47,7 +50,7 @@ async function askQuestion() {
 
     formData.append("question", question);
 
-    const response = await fetch("/ask", {
+    const response = await fetch(`${API_URL}/ask`, {
         method: "POST",
         body: formData
     });
@@ -73,7 +76,7 @@ async function semanticSearch() {
 
     formData.append("query", query);
 
-    const response = await fetch("/search", {
+    const response = await fetch(`${API_URL}/search`, {
         method: "POST",
         body: formData
     });
@@ -94,7 +97,7 @@ async function semanticSearch() {
 
 async function clearPaper() {
 
-    const response = await fetch("/clear");
+    const response = await fetch(`${API_URL}/clear`);
 
     const data = await response.json();
 
