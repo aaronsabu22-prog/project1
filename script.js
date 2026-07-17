@@ -1,5 +1,5 @@
 // Replace this with your deployed FastAPI backend URL (e.g. from Render/Railway)
-const API_URL = "https://your-backend-name.onrender.com";
+const API_URL = "https://project1-7q9r.onrender.com";
 
 async function uploadPaper() {
 
